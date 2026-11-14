@@ -390,12 +390,15 @@ namespace
 #endif
 		// Where every task is stuck (the game task in particular). Only run once: it
 		// suspends the scheduler and the other core while it walks the stacks.
+		// (the ESP-IDF walks other tasks' stacks on Xtensa only)
+#if defined(__XTENSA__)
 		static bool s_backtracesPrinted = false;
 		if (!s_backtracesPrinted)
 		{
 			s_backtracesPrinted = true;
 			esp_backtrace_print_all_tasks(16);
 		}
+#endif
 		s_lastProgressUs = esp_timer_get_time();	// report again in 8s if still stuck.
 	}
 
