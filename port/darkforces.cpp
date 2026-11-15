@@ -105,6 +105,23 @@ namespace
 	};
 	VirtualMouse s_mouse;
 
+	// Touch as the mouse: in the menus the finger is the cursor (a press is a
+	// left click there); in a mission a drag off the touch gamepad looks
+	// around (mouse look) and a quick tap fires.
+	struct TouchMouse
+	{
+		bool down = false;		// a finger was down last update
+		int lastX = 0, lastY = 0;	// where, in frame pixels
+		int startX = 0, startY = 0;
+		int64_t startUs = 0;
+		bool moved = false;		// too far for a tap
+		int fireUpdates = 0;	// updates left of a tap's shot
+	};
+	TouchMouse s_touch;
+	constexpr int TOUCH_LOOK_SCALE = 2;			// mouse look per frame pixel dragged
+	constexpr int TOUCH_TAP_SLOP = 4;			// frame pixels a tap may wander
+	constexpr int64_t TOUCH_TAP_US = 250000;	// and how long it may last
+
 	// Controller bindings for the box gamepad. Unmodified buttons map to
 	// controller buttons; SELECT acts as a modifier that re-routes buttons to
 	// alternate controller buttons / keyboard keys (see updateInput()).
@@ -281,12 +298,26 @@ namespace
 	void updateInput(bool menuMode)
 	{
 		static auto& box = BoxEmu::get();
-		const GamepadState state = box.gamepad_state();
+		GamepadState state = box.gamepad_state();
+		// in the menus touch is the mouse, not the touch gamepad
+		if (menuMode) { state.buttons &= ~box.touch_gamepad_state().buttons; }
 
 		if (menuMode != s_wasMenuMode)
 		{
 			releaseAll();
 			s_wasMenuMode = menuMode;
+			s_touch = TouchMouse();
+		}
+
+		// the finger (in a mission: one off the touch gamepad), in frame pixels
+		const auto finger = box.touch_pointer(!menuMode);
+		const bool touching = finger.fingers > 0;
+		int touchX = 0, touchY = 0;
+		if (touching)
+		{
+			const auto [x, y] = box.screen_to_frame(finger.x, finger.y, DF_WIDTH, DF_HEIGHT);
+			touchX = x;
+			touchY = y;
 		}
 
 		if (menuMode)
@@ -322,6 +353,11 @@ namespace
 			if (state.right) { s_mouse.x += s_mouse.speed; }
 			if (state.up)    { s_mouse.y -= s_mouse.speed; }
 			if (state.down)  { s_mouse.y += s_mouse.speed; }
+			if (touching)
+			{
+				s_mouse.x = float(touchX);
+				s_mouse.y = float(touchY);
+			}
 			s_mouse.x = std::clamp(s_mouse.x, 0.0f, float(DF_WIDTH - 1));
 			s_mouse.y = std::clamp(s_mouse.y, 0.0f, float(DF_HEIGHT - 1));
 			TFE_Input::setMousePos(int(s_mouse.x), int(s_mouse.y));
@@ -329,24 +365,51 @@ namespace
 
 			for (const auto& m : s_menuMap)
 			{
-				const bool down = state.is_pressed(m.pad);
+				const bool down = state.is_pressed(m.pad) || (m.mouse == MBUTTON_LEFT && touching);
 				if (m.key != KEY_UNKNOWN) { setKey(m.key, down); }
 				if (m.mouse != MBUTTON_COUNT) { setMouse(m.mouse, down); }
 			}
 		}
 		else
 		{
-			TFE_Input::setRelativeMousePos(0, 0);
+			// touch: a drag looks around, a quick tap fires
+			int lookX = 0, lookY = 0;
+			if (touching && !s_touch.down)
+			{
+				s_touch.startX = touchX;
+				s_touch.startY = touchY;
+				s_touch.startUs = esp_timer_get_time();
+				s_touch.moved = false;
+			}
+			else if (touching)
+			{
+				lookX = (touchX - s_touch.lastX) * TOUCH_LOOK_SCALE;
+				lookY = (touchY - s_touch.lastY) * TOUCH_LOOK_SCALE;
+				if (std::abs(touchX - s_touch.startX) > TOUCH_TAP_SLOP || std::abs(touchY - s_touch.startY) > TOUCH_TAP_SLOP)
+				{
+					s_touch.moved = true;
+				}
+			}
+			else if (s_touch.down && !s_touch.moved && esp_timer_get_time() - s_touch.startUs < TOUCH_TAP_US)
+			{
+				s_touch.fireUpdates = 3;
+			}
+			s_touch.down = touching;
+			s_touch.lastX = touchX;
+			s_touch.lastY = touchY;
+			TFE_Input::setRelativeMousePos(lookX, lookY);
+
 			const bool modifier = state.select;
 			for (const auto& m : s_gameMap)
 			{
-				const bool down = state.is_pressed(m.pad);
+				const bool down = state.is_pressed(m.pad) || (m.pad == GamepadState::Button::A && s_touch.fireUpdates > 0 && !modifier);
 				const bool altDown = down && modifier;
 				const bool mainDown = down && !modifier;
 				setCtrl(m.ctrl, mainDown);
 				if (m.altCtrl != CONTROLLER_BUTTON_UNKNOWN) { setCtrl(m.altCtrl, altDown); }
 				if (m.altKey != KEY_UNKNOWN) { setKey(m.altKey, altDown); }
 			}
+			if (s_touch.fireUpdates > 0) { s_touch.fireUpdates--; }
 		}
 	}
 
@@ -447,6 +510,7 @@ void init_darkforces(const std::string& gob_filename, uint8_t *romdata, size_t r
 	memset(s_ctrlDown, 0, sizeof(s_ctrlDown));
 	memset(s_keyDown, 0, sizeof(s_keyDown));
 	memset(s_mouseDown, 0, sizeof(s_mouseDown));
+	s_touch = TouchMouse();
 
 	// The game directory is the directory containing DARK.GOB.
 	size_t slash = s_gobPath.find_last_of('/');
@@ -566,7 +630,8 @@ void init_darkforces(const std::string& gob_filename, uint8_t *romdata, size_t r
 	}
 	InputConfig* inputConfig = inputMapping_get();
 	inputConfig->controllerFlags |= CFLAG_ENABLE;
-	inputConfig->mouseMode = MMODE_NONE;
+	// (mouse look: only touch moves the mouse in a mission)
+	inputConfig->mouseMode = MMODE_LOOK;
 
 	TFE_SaveSystem::init();
 
