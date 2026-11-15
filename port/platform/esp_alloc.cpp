@@ -304,6 +304,14 @@ namespace TFE_Memory
 		pool_destroy();
 	}
 
+	void poolForget()
+	{
+		PoolLock lock;
+		if (s_active) { return; }
+		s_base = nullptr;
+		s_size = 0;
+	}
+
 	namespace
 	{
 		struct PoolSummary { size_t used, usedBlocks, free, freeBlocks, largestFree; };

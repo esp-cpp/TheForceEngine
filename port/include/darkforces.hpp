@@ -12,6 +12,10 @@ void init_darkforces(const std::string& gob_filename, uint8_t *romdata, size_t r
 void reset_darkforces();
 void run_darkforces_rom();
 void deinit_darkforces();
+/// After deinit_darkforces(), for a host that frees the ROM block it gave
+/// init_darkforces() (the box keeps it): free() stops treating pointers into
+/// it as the ended game's (they are the heap's again).
+void darkforces_forget_block();
 /// True once the player has quit the game from its own menu.
 bool darkforces_quit_requested();
 void pause_darkforces_tasks();

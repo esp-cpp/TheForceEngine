@@ -34,6 +34,9 @@ namespace TFE_Memory
 	// poolEnd() reports anything still allocated in the block.
 	bool poolBegin(uint8_t* base, size_t size);
 	void poolEnd();
+	// Stop recognising the ended session's block: for a host that gives the
+	// block back to the heap (other code then allocates and frees there).
+	void poolForget();
 	void getPoolStats(size_t* used, size_t* peak, size_t* overflowBytes);
 	// Print how the 4MB block is used: used / free bytes and block counts, largest free block.
 	void printPoolSummary();

@@ -824,6 +824,11 @@ std::span<uint8_t> get_darkforces_video_buffer()
 	return frame;
 }
 
+void darkforces_forget_block()
+{
+	TFE_Memory::poolForget();
+}
+
 void deinit_darkforces()
 {
 	TFE_Memory::DfAllocScope allocScope;
