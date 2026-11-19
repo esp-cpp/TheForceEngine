@@ -128,7 +128,13 @@ namespace
 			}
 			noteOverflow(size);
 		}
-		return heap_caps_malloc(size ? size : 1, MALLOC_CAP_DEFAULT);
+		// No session scope (before poolBegin / after poolEnd, or a task outside the
+		// engine), or the block is full: the PSRAM heap, as the comments here and in
+		// esp_platform.h / paths-posix.cpp intend. MALLOC_CAP_DEFAULT alone is
+		// internal RAM first at any size on the S3 and the P4. (This also serves the
+		// std::string / std::map template copies the rest of the firmware ends up
+		// linking from this library: their operator new is renamed to df_new too.)
+		return heap_caps_malloc_prefer(size ? size : 1, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_DEFAULT);
 	}
 
 	void dfFree(void* ptr)
