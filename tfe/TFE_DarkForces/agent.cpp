@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <cstring>
 
 #include "agent.h"
@@ -57,6 +58,16 @@ namespace TFE_DarkForces
 		}
 	}
 
+	// An agent always has a name. The agent menu lists the agents up to the
+	// first one without a name and clears the rest, so a nameless agent (from
+	// the New Agent dialog confirmed with an empty name, easy without a
+	// keyboard) could play its first mission, then vanished from the menu, and
+	// its progress was written back cleared.
+	static void agent_defaultName(char* name, s32 agentId)
+	{
+		snprintf(name, 32, "AGENT %d", (int)agentId + 1);
+	}
+
 	void agent_serialize(Stream* stream)
 	{
 		bool write = serialization_getMode() == SMODE_WRITE;
@@ -92,6 +103,13 @@ namespace TFE_DarkForces
 			agent_readSavedData(s_agentId, &data);
 		}
 		SERIALIZE(SaveVersionInit, data, { 0 });
+		// A save made by a nameless agent: match it with the agent that has
+		// that agent's name now (nameless agents were agent 0, AGENT 1).
+		if (!write && !name[0])
+		{
+			agent_defaultName(name, 0);
+			strCopyAndZero(data.agentData.name, name, 32);
+		}
 
 		// Find the agent.
 		if (!write)
@@ -159,6 +177,13 @@ namespace TFE_DarkForces
 			if (agent_readConfigData(&file, i, &saveData))
 			{
 				memcpy(&s_agentData[i], &saveData.agentData, sizeof(AgentData));
+				// A nameless agent with progress (see agent_defaultName); an unused
+				// record is all zeros, a created agent has nextMission >= 1.
+				if (!s_agentData[i].name[0] && s_agentData[i].nextMission >= 1)
+				{
+					agent_defaultName(s_agentData[i].name, i);
+					TFE_System::logWrite(LOG_WARNING, "Agent", "Agent %d had no name, named it '%s'.", i, s_agentData[i].name);
+				}
 				agentReadCount++;
 			}
 		}
@@ -284,6 +309,10 @@ namespace TFE_DarkForces
 		saveData.ammo[9] = FIXED(2);
 
 		strCopyAndZero(data->name, name, 32);
+		if (!data->name[0])
+		{
+			agent_defaultName(data->name, agentId);
+		}
 		data->difficulty = 1;
 		data->nextMission = 1;
 		data->selectedMission = 1;
