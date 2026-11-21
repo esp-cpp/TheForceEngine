@@ -57,6 +57,17 @@ namespace TFE_SaveSystem
 
 	void saveHeader(Stream* stream, const char* saveName)
 	{
+#ifdef TFE_ESPBOX
+		// The handhelds keep their own screenshot per save slot and have no
+		// screen capture (captureScreenToMemory is a stub): the header's image
+		// is the 4x4 placeholder, without the full-screen capture buffer
+		// (320x200x4 = 256 KB, never filled). In a big level that allocation
+		// failed (Talay on the ESP32-S3-BOX leaves ~120 KB of PSRAM) and the
+		// save crashed reading through the NULL buffer.
+		static u32 s_placeholderImage[SAVE_IMAGE_WIDTH * SAVE_IMAGE_HEIGHT] = {};
+		u8* png;
+		u32 pngSize = (u32)TFE_Image::writeImageToMemory(png, SAVE_IMAGE_WIDTH, SAVE_IMAGE_HEIGHT, s_placeholderImage);
+#else
 		// Generate a screenshot.
 		DisplayInfo displayInfo;
 		TFE_RenderBackend::getDisplayInfo(&displayInfo);
@@ -112,6 +123,7 @@ namespace TFE_SaveSystem
 		// Save to memory.
 		u8* png;
 		u32 pngSize = (u32)TFE_Image::writeImageToMemory(png, newWidth, newHeight, s_imageBuffer[1]);
+#endif
 
 		// Master version.
 		u32 version = SVER_CUR;
