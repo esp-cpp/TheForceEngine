@@ -1,5 +1,7 @@
 #include <climits>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "level.h"
 #include "levelData.h"
@@ -41,6 +43,15 @@ void espbox_free_sprite_scratch();
 void espbox_free_level_scratch();
 void espbox_free_inf_scratch();
 void espbox_free_model_scratch();
+// All of the loaders' scratch read buffers (after a level or a save state is loaded).
+void espbox_free_loader_scratch()
+{
+	espbox_free_rtexture_scratch();
+	espbox_free_sprite_scratch();
+	espbox_free_level_scratch();
+	espbox_free_inf_scratch();
+	espbox_free_model_scratch();
+}
 #endif
 
 namespace TFE_Jedi
@@ -85,11 +96,7 @@ namespace TFE_Jedi
 		inf_load(levelName);
 #ifdef TFE_ESPBOX
 		// The loaders' scratch read buffers (~0.8MB) are not needed while playing.
-		espbox_free_rtexture_scratch();
-		espbox_free_sprite_scratch();
-		espbox_free_level_scratch();
-		espbox_free_inf_scratch();
-		espbox_free_model_scratch();
+		espbox_free_loader_scratch();
 #endif
 		level_loadGoals(levelName);
 
@@ -113,6 +120,71 @@ namespace TFE_Jedi
 		s_palModified = JTRUE;
 	}
 		
+	// Loads the level texture of slot `index` (and the base copy kept for serialization).
+	static bool level_loadTexture(s32 index, const char* textureName)
+	{
+		TextureData* tex = bitmap_load(textureName, 1);
+		if (!tex)
+		{
+			TFE_System::logWrite(LOG_WARNING, "level_loadGeometry", "Could not open '%s', using 'default.bm' instead.", textureName);
+			tex = bitmap_load("default.bm", 1);
+			if (!tex)
+			{
+				TFE_System::logWrite(LOG_ERROR, "level_loadGeometry", "'default.bm' is not a valid BM file!");
+				assert(0);
+				return false;
+			}
+		}
+		TextureData** texture = &s_levelState.textures[index];
+		*texture = tex;
+		// This version never gets modified, so serialization is simpler.
+		s_levelState.textures[s_levelState.textureCount + index] = tex;
+
+		// Setup an animated texture.
+		if (tex->uvWidth == BM_ANIMATED_TEXTURE)
+		{
+			bitmap_setupAnimatedTexture(texture, index);
+		}
+		return true;
+	}
+
+#ifdef TFE_ESPBOX
+	// Loads the textures (named in the level's list) that a sector or a wall uses.
+	static bool level_loadUsedTextures(const std::vector<std::string>& names)
+	{
+		const s32 count = s_levelState.textureCount;
+		std::vector<u8> used(count, 0);
+		auto mark = [&](TextureData** slot)
+		{
+			const ptrdiff_t index = slot ? slot - s_levelState.textures : -1;
+			if (index >= 0 && index < count) { used[index] = 1; }
+		};
+		for (s32 s = 0; s < s_levelState.sectorCount; s++)
+		{
+			const RSector* sector = &s_levelState.sectors[s];
+			mark(sector->floorTex);
+			mark(sector->ceilTex);
+			for (s32 w = 0; w < sector->wallCount; w++)
+			{
+				const RWall* wall = &sector->walls[w];
+				mark(wall->midTex);
+				mark(wall->topTex);
+				mark(wall->botTex);
+				mark(wall->signTex);
+			}
+		}
+		s32 loaded = 0;
+		for (s32 i = 0; i < count; i++)
+		{
+			if (!used[i] || names[i].empty()) { continue; }
+			if (!level_loadTexture(i, names[i].c_str())) { return false; }
+			loaded++;
+		}
+		TFE_System::logWrite(LOG_MSG, "level_loadGeometry", "Loaded the %d of %d listed textures the level uses.", loaded, count);
+		return true;
+	}
+#endif
+
 	JBool level_loadGeometry(const char* levelName)
 	{
 		s_levelState.secretCount = 0;
@@ -217,6 +289,13 @@ namespace TFE_Jedi
 		memset(s_levelState.textures, 0, 2 * s_levelState.textureCount * sizeof(TextureData**));
 
 		// Load Textures.
+		// TFE_ESPBOX: only the textures the sectors and walls use are loaded, after they are read
+		// (level_loadUsedTextures() below): a level's list can name many it never draws (JABSHIP
+		// lists 359 and draws 51: 1.1MB of unused bitmaps). The others' slots stay null, like
+		// <NoTexture>; INF only copies textures from one sector or wall to another.
+#ifdef TFE_ESPBOX
+		std::vector<std::string> textureNames(s_levelState.textureCount);
+#endif
 		TextureData** texture = s_levelState.textures;
 		TextureData** texBase = s_levelState.textures + s_levelState.textureCount;
 		for (s32 i = 0; i < s_levelState.textureCount; i++, texture++, texBase++)
@@ -226,7 +305,11 @@ namespace TFE_Jedi
 			if (sscanf(line, " TEXTURE: %s ", textureName) != 1)
 			{
 				TFE_System::logWrite(LOG_ERROR, "level_loadGeometry", "Cannot read texture name.");
+#ifdef TFE_ESPBOX
+				textureNames[i] = "default.bm";
+#else
 				*texture = bitmap_load("default.bm", 1);
+#endif
 			}
 			else if (strcasecmp(textureName, "<NoTexture>") == 0)
 			{
@@ -234,27 +317,11 @@ namespace TFE_Jedi
 			}
 			else
 			{
-				TextureData* tex = bitmap_load(textureName, 1);
-				if (!tex)
-				{
-					TFE_System::logWrite(LOG_WARNING, "level_loadGeometry", "Could not open '%s', using 'default.bm' instead.", textureName);
-					tex = bitmap_load("default.bm", 1);
-					if (!tex)
-					{
-						TFE_System::logWrite(LOG_ERROR, "level_loadGeometry", "'default.bm' is not a valid BM file!");
-						assert(0);
-						return false;
-					}
-				}
-				*texture = tex;
-				// This version never gets modified, so serialization is simpler.
-				*texBase = tex;
-
-				// Setup an animated texture.
-				if (tex->uvWidth == BM_ANIMATED_TEXTURE)
-				{
-					bitmap_setupAnimatedTexture(texture, i);
-				}
+#ifdef TFE_ESPBOX
+				textureNames[i] = textureName;
+#else
+				if (!level_loadTexture(i, textureName)) { return false; }
+#endif
 			}
 		}
 
@@ -571,6 +638,9 @@ namespace TFE_Jedi
 		s_levelState.controlSector->id = s_levelState.sectorCount;
 		s_levelState.controlSector->index = s_levelState.controlSector->id;
 
+#ifdef TFE_ESPBOX
+		if (!level_loadUsedTextures(textureNames)) { return false; }
+#endif
 		return true;
 	}
 

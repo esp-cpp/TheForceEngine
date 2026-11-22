@@ -61,6 +61,10 @@
 using namespace TFE_Memory;
 using namespace TFE_Input;
 
+#ifdef TFE_ESPBOX
+void espbox_free_loader_scratch();	// TFE_Jedi/Level/level.cpp
+#endif
+
 namespace TFE_DarkForces
 {
 	/////////////////////////////////////////////
@@ -666,6 +670,19 @@ namespace TFE_DarkForces
 						handleLevelComplete();
 					}
 					
+#ifdef TFE_ESPBOX
+					// The level is freed before what comes next starts (here, as in the
+					// original order below, nothing uses it any more): the next mission's
+					// cutscene (up to ~1MB) does not fit next to a big level on the
+					// handhelds (finishing NARSHADA ran out of memory in 'jabba1').
+					region_clear(s_levelRegion);
+					bitmap_clearLevelData();
+					bitmap_setAllocator(s_gameRegion);
+					level_freeAllAssets();
+					TFE_A11Y::clearCaptions();
+
+					startNextMode();
+#else
 					startNextMode();
 
 					region_clear(s_levelRegion);
@@ -673,6 +690,7 @@ namespace TFE_DarkForces
 					bitmap_setAllocator(s_gameRegion);
 					level_freeAllAssets();
 					TFE_A11Y::clearCaptions();
+#endif
 				}
 			} break;
 		}
@@ -1371,6 +1389,11 @@ namespace TFE_DarkForces
 		if (!writeState)
 		{
 			agent_restartEndLevelTask();
+#ifdef TFE_ESPBOX
+			// As after a level load: the loaders' read buffers keep the size of the largest
+			// file they read (up to ~0.7MB) and are not needed while playing.
+			espbox_free_loader_scratch();
+#endif
 		}
 
 		time_pause(JFALSE);

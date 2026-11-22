@@ -63,7 +63,14 @@ namespace TFE_Jedi
 		EdgePairFixed* flatEdge;
 		EdgePairFixed  flatEdgeList[MAX_SEG];
 		EdgePairFixed* adjoinEdge;
+#ifdef TFE_ESPBOX
+		// Indexed by s_adjoinSegCount, which wall_addAdjoinSegment() keeps below MAX_ADJOIN_SEG
+		// for the whole frame (each sector's edges start at the count, which never goes down
+		// within a frame): MAX_ADJOIN_SEG entries are all it uses (-253KB).
+		EdgePairFixed  adjoinEdgeList[MAX_ADJOIN_SEG];
+#else
 		EdgePairFixed  adjoinEdgeList[MAX_ADJOIN_SEG * MAX_ADJOIN_DEPTH];
+#endif
 
 		RWallSegmentFixed   wallSegListDst[MAX_SEG];
 		RWallSegmentFixed   wallSegListSrc[MAX_SEG];

@@ -73,8 +73,11 @@ namespace TFE_Jedi
 		TASK_PREALLOCATED_CHUNKS = 1,
 
 #ifdef TFE_ESPBOX
-		TASK_STACK_SIZE = 8 * 1024,		// 8KB of (local context) stack memory per task.
-		TASK_STACK_CHUNK_SIZE = 16,		// 128KB of memory per chunk of 16 tasks with stack memory.
+		// The stack holds a task's local contexts, one per recursion level (at most
+		// TASK_MAX_LEVELS): none has an array, the largest is 64 bytes, so 1KB at most.
+		// (ctxAllocate() asserts that it fits.)
+		TASK_STACK_SIZE = 2 * 1024,		// 2KB of (local context) stack memory per task.
+		TASK_STACK_CHUNK_SIZE = 16,		// 32KB of memory per chunk of 16 tasks with stack memory.
 #else
 		TASK_STACK_SIZE = 32 * 1024,	// 32KB of stack memory.
 		TASK_STACK_CHUNK_SIZE = 64,		// 2MB of memory for 64 tasks with stack memory.
